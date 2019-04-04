@@ -3,13 +3,17 @@ import sys
 import argparse
 import cv2
 import numpy
-import pymouse
-
+import pyautogui as m
 
 class LaserTracker(object):
 
-    def __init__(self, cam_width=640, cam_height=480, hue1_min=20, hue1_max=160,
-                 sat_min=100, sat_max=255, val_min=200, val_max=256,
+    def __init__(self, cam_width=640, cam_height=480,
+                 hue_min_red=20, hue_max_red=160,
+                 sat_min_red=100, sat_max_red=255,
+                 val_min_red=200, val_max_red=256,
+                 hue_min_green=65, hue_max_green=80,
+                 sat_min_green=60, sat_max_green=255,
+                 val_min_green=60, val_max_green=255,
                  display_thresholds=False):
         """
         * ``cam_width`` x ``cam_height`` -- This should be the size of the
@@ -18,9 +22,9 @@ class LaserTracker(object):
         HSV color space Threshold values for a RED laser pointer are determined
         by:
 
-        * ``hue1_min``, ``hue1_max`` -- Min/Max allowed Hue1 values
-        * ``sat_min``, ``sat_max`` -- Min/Max allowed Saturation values
-        * ``val_min``, ``val_max`` -- Min/Max allowed pixel values
+            * ``hue_min_green``, ``hue_max_green`` -- Min/Max allowed hue_red values
+        * ``sat_min_green``, ``sat_max_green`` -- Min/Max allowed Saturation values
+        * ``val_min_green``, ``val_max_green`` -- Min/Max allowed pixel values
 
         If the dot from the laser pointer doesn't fall within these values, it
         will be ignored.
@@ -32,19 +36,33 @@ class LaserTracker(object):
 
         self.cam_width = cam_width
         self.cam_height = cam_height
-        self.hue1_min = hue1_min
-        self.hue1_max = hue1_max
-        self.sat_min = sat_min
-        self.sat_max = sat_max
-        self.val_min = val_min
-        self.val_max = val_max
+
+        #for red
+        self.hue_min_red = hue_min_red
+        self.hue_max_red = hue_max_red
+        self.sat_min_red = sat_min_red
+        self.sat_max_red = sat_max_red
+        self.val_min_red = val_min_red
+        self.val_max_red = val_max_red
+        
+        #for green
+        self.hue_min_green = hue_min_green
+        self.hue_max_green = hue_max_green
+        self.sat_min_green = sat_min_green
+        self.sat_max_green = sat_max_green
+        self.val_min_green = val_min_green
+        self.val_max_green = val_max_green
+        
         self.display_thresholds = display_thresholds
 
         self.capture = None  # camera capture device
         self.channels = {
-            'hue1': None,
-            'saturation': None,
-            'value': None,
+            'hue_red': None,
+            'saturation_red': None,
+            'value_red': None,
+            'hue_green': None,
+            'saturation_green': None,
+            'value_green': None,
             'laser': None,
         }
 
@@ -77,7 +95,7 @@ class LaserTracker(object):
         # Try to start capturing frames
         self.capture = cv2.VideoCapture(device)
         if not self.capture.isOpened():
-            sys.stderr.write("Faled to Open Capture device. Quitting.\n")
+            sys.stderr.write("Failed to Open Capture device. Quitting.\n")
             sys.exit(1)
 
         # set the wanted image size from the camera
@@ -102,22 +120,42 @@ class LaserTracker(object):
             sys.exit(0)
 
     def move_mouse(self,x,y):
-    	m = pymouse.PyMouse()
     	new_x = x/640*1920
     	new_y = y/480*1080
     	print(str(new_x)+" "+str(new_y))
-    	m.move(1920-new_x,new_y)
+    	m.moveTo(1920-new_x,new_y)
+
+    def click_mouse(self, x, y):
+        new_x = x / 640 * 1920
+        new_y = y / 480 * 1080
+        print(str(new_x) + " " + str(new_y))
+        m.dragTo(1920 - new_x, new_y)
 
     def threshold_image(self, channel):
-        if channel == "hue1":
-            minimum = self.hue1_min
-            maximum = self.hue1_max
-        elif channel == "saturation":
-            minimum = self.sat_min
-            maximum = self.sat_max
-        elif channel == "value":
-            minimum = self.val_min
-            maximum = self.val_max
+        if channel == "hue_red":
+            flag = 1
+            minimum = self.hue_min_red
+            maximum = self.hue_max_red
+        elif channel == "saturation_red":
+            flag = 1
+            minimum = self.sat_min_red
+            maximum = self.sat_max_red
+        elif channel == "value_red":
+            flag = 1
+            minimum = self.val_min_red
+            maximum = self.val_max_red
+        elif channel == "hue_green":
+            flag = 2
+            minimum = self.sat_min_green
+            maximum = self.sat_max_green
+        elif channel == "saturation_green":
+            flag = 2
+            minimum = self.sat_min_green
+            maximum = self.sat_max_green
+        elif channel == "value_green":
+            flag = 2
+            minimum = self.val_min_green
+            maximum = self.val_max_green
 
         (t, tmp) = cv2.threshold(
             self.channels[channel],  # src
@@ -133,10 +171,12 @@ class LaserTracker(object):
             cv2.THRESH_BINARY  # type
         )
 
-        if channel == 'hue1':
-            # only works for filtering red color because the range for the hue1
+        if channel == 'hue_red':
+            # only works for filtering red color because the range for the hue_red
             # is split
-            self.channels['hue1'] = cv2.bitwise_not(self.channels['hue1'])
+            self.channels['hue_red'] = cv2.bitwise_not(self.channels['hue_red'])
+        elif channel == 'hue_green':
+            self.channels['hue_green'] = cv2.bitwise_not(self.channels['hue_green'])
 
     def track(self, frame, mask):
         """
@@ -157,7 +197,10 @@ class LaserTracker(object):
             c = max(countours, key=cv2.contourArea)
             ((x, y), radius) = cv2.minEnclosingCircle(c)
             #print(str(x)+" "+str(y))
-            self.move_mouse(float(x),float(y))
+            # if(flag==1):
+            self.move_mouse(float(x), float(y))
+            # elif(flag==2):
+            #     self.click_mouse(float(x), float(y))
             moments = cv2.moments(c)
             if moments["m00"] > 0:
                 center = int(moments["m10"] / moments["m00"]), \
@@ -170,7 +213,7 @@ class LaserTracker(object):
                 # draw the circle and centroid on the frame,
                 cv2.circle(frame, (int(x), int(y)), int(radius),
                            (0, 255, 255), 2)
-                cv2.circle(frame, center, 5, (0, 0, 255), -1)
+                cv2.circle(frame, center, 5, (0, 255, 0), -1)
                 # then update the ponter trail
                 if self.previous_position:
                     cv2.line(self.trail, self.previous_position, center,
@@ -186,30 +229,53 @@ class LaserTracker(object):
 
         # split the video frame into color channels
         h, s, v = cv2.split(hsv_img)
-        self.channels['hue1'] = h
-        self.channels['saturation'] = s
-        self.channels['value'] = v
-
-        # Threshold ranges of HSV components; storing the results in place
-        self.threshold_image("hue1")
-        self.threshold_image("saturation")
-        self.threshold_image("value")
-
-        # Perform an AND on HSV components to identify the laser!
+        # print(s);
+        # if(200<v<256):
+        self.channels['hue_red'] = h
+        self.channels['saturation_red'] = s
+        self.channels['value_red'] = v
+        self.threshold_image("hue_red")
+        self.threshold_image("saturation_red")
+        self.threshold_image("value_red")
         self.channels['laser'] = cv2.bitwise_and(
-            self.channels['hue1'],
-            self.channels['value']
+            self.channels['hue_red'],
+            self.channels['value_red']
         )
         self.channels['laser'] = cv2.bitwise_and(
-            self.channels['saturation'],
+            self.channels['saturation_red'],
             self.channels['laser']
         )
 
-        # Merge the HSV components back together.
         hsv_image = cv2.merge([
-            self.channels['hue1'],
-            self.channels['saturation'],
-            self.channels['value'],
+            self.channels['hue_red'],
+            self.channels['saturation_red'],
+            self.channels['value_red'],
+        ])
+
+        # self.track(frame, self.channels['laser'])
+        #
+        # return hsv_image
+
+        # elif(<v<255):
+        self.channels['hue_green'] = h
+        self.channels['saturation_green'] = s
+        self.channels['value_green'] = v
+        self.threshold_image("hue_green")
+        self.threshold_image("saturation_green")
+        self.threshold_image("value_green")
+        self.channels['laser'] = cv2.bitwise_and(
+            self.channels['hue_green'],
+            self.channels['value_green']
+        )
+        self.channels['laser'] = cv2.bitwise_and(
+            self.channels['saturation_green'],
+            self.channels['laser']
+        )
+
+        hsv_image = cv2.merge([
+            self.channels['hue_green'],
+            self.channels['saturation_green'],
+            self.channels['value_green'],
         ])
 
         self.track(frame, self.channels['laser'])
@@ -224,7 +290,7 @@ class LaserTracker(object):
         cv2.imshow('LaserPointer', self.channels['laser'])
         if self.display_thresholds:
             cv2.imshow('Thresholded_HSV_Image', img)
-            cv2.imshow('Hue1', self.channels['hue1'])
+            cv2.imshow('hue_red', self.channels['hue_red'])
             cv2.imshow('Saturation', self.channels['saturation'])
             cv2.imshow('Value', self.channels['value'])
 
@@ -237,7 +303,7 @@ class LaserTracker(object):
                                         10 + self.cam_width, 0)
         if self.display_thresholds:
             self.create_and_position_window('Thresholded_HSV_Image', 10, 10)
-            self.create_and_position_window('Hue1', 20, 20)
+            self.create_and_position_window('hue_red', 20, 20)
             self.create_and_position_window('Saturation', 30, 30)
             self.create_and_position_window('Value', 40, 40)
 
@@ -260,53 +326,53 @@ class LaserTracker(object):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Run the Laser Tracker')
-    parser.add_argument('-W', '--width',
-                        default=640,
-                        type=int,
-                        help='Camera Width')
-    parser.add_argument('-H', '--height',
-                        default=480,
-                        type=int,
-                        help='Camera Height')
-    parser.add_argument('-u', '--hue1min',
-                        default=20,
-                        type=int,
-                        help='Hue1 Minimum Threshold')
-    parser.add_argument('-U', '--hue1max',
-                        default=160,
-                        type=int,
-                        help='Hue1 Maximum Threshold')
-    parser.add_argument('-s', '--satmin',
-                        default=100,
-                        type=int,
-                        help='Saturation Minimum Threshold')
-    parser.add_argument('-S', '--satmax',
-                        default=255,
-                        type=int,
-                        help='Saturation Maximum Threshold')
-    parser.add_argument('-v', '--valmin',
-                        default=200,
-                        type=int,
-                        help='Value Minimum Threshold')
-    parser.add_argument('-V', '--valmax',
-                        default=255,
-                        type=int,
-                        help='Value Maximum Threshold')
-    parser.add_argument('-d', '--display',
-                        action='store_true',
-                        help='Display Threshold Windows')
-    params = parser.parse_args()
+    # parser = argparse.ArgumentParser(description='Run the Laser Tracker')
+    # parser.add_argument('-W', '--width',
+    #                     default=640,
+    #                     type=int,
+    #                     help='Camera Width')
+    # parser.add_argument('-H', '--height',
+    #                     default=480,
+    #                     type=int,
+    #                     help='Camera Height')
+    # parser.add_argument('-u', '--hue_redmin',
+    #                     default=65,
+    #                     type=int,
+    #                     help='hue_red Minimum Threshold')
+    # parser.add_argument('-U', '--hue_redmax',
+    #                     default=80,
+    #                     type=int,
+    #                     help='hue_red Maximum Threshold')
+    # parser.add_argument('-s', '--satmin',
+    #                     default=60,
+    #                     type=int,
+    #                     help='Saturation Minimum Threshold')
+    # parser.add_argument('-S', '--satmax',
+    #                     default=255,
+    #                     type=int,
+    #                     help='Saturation Maximum Threshold')
+    # parser.add_argument('-v', '--valmin',
+    #                     default=60,
+    #                     type=int,
+    #                     help='Value Minimum Threshold')
+    # parser.add_argument('-V', '--valmax',
+    #                     default=255,
+    #                     type=int,
+    #                     help='Value Maximum Threshold')
+    # parser.add_argument('-d', '--display',
+    #                     action='store_true',
+    #                     help='Display Threshold Windows')
+    # params = parser.parse_args()
 
     tracker = LaserTracker(
-        cam_width=params.width,
-        cam_height=params.height,
-        hue1_min=params.hue1min,
-        hue1_max=params.hue1max,
-        sat_min=params.satmin,
-        sat_max=params.satmax,
-        val_min=params.valmin,
-        val_max=params.valmax,
-        display_thresholds=params.display
+        cam_width=640,
+        cam_height=480,
+        hue_min_red=20, hue_max_red=160,
+        sat_min_red=100, sat_max_red=255,
+        val_min_red=200, val_max_red=256,
+        hue_min_green=65,hue_max_green=80,
+        sat_min_green=60, sat_max_green=255,
+        val_min_green=60, val_max_green=255,
+        display_thresholds=False
     )
     tracker.run()
